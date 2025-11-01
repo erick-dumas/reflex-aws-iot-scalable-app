@@ -6,3 +6,8 @@ class DeviceData(BaseModel):
     device_id: str = Field(..., description="ID único del dispositivo IoT")
     temperature: float = Field(..., description="Temperatura medida en °C")
     timestamp: Optional[datetime] = Field(default_factory=datetime.utcnow, description="Hora del envío del dato")
+
+
+class RegisterPayload(BaseModel):
+    device_id: str
+    token: str

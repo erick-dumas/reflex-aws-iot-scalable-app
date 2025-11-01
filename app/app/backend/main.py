@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.backend.routers import device
+from app.backend.routers import device, sessions
 
 fastapi_app  = FastAPI(
     title="IoT Receiver API",
@@ -9,6 +9,7 @@ fastapi_app  = FastAPI(
 
 # Registrar los routers
 fastapi_app.include_router(device.router)
+fastapi_app.include_router(sessions.router)
 
 @fastapi_app.get("/")
 def root():
