@@ -1,16 +1,22 @@
 from fastapi import APIRouter, HTTPException
-from app.backend.registrations import register_token_for_device, unregister_token_for_device
+from app.backend.registrations import register_token, unregister_token
 from app.backend.models import RegisterPayload
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
 
 @router.post("/register")
 async def register_session(payload: RegisterPayload):
-    # Verificar que device_id es válido / autenticación
-    await register_token_for_device(payload.device_id, payload.token)
+    # Posiblemente verificar token aquí
+    await register_token(payload.token)
     return {"status": "ok"}
 
 @router.post("/unregister")
 async def unregister_session(payload: RegisterPayload):
-    await unregister_token_for_device(payload.device_id, payload.token)
+    await unregister_token(payload.token)
     return {"status": "ok"}
+
+@router.post("/ping")
+async def ping_session(payload: RegisterPayload):
+    # Simplemente renueva el TTL del token en Redis
+    await register_token(payload.token)
+    return {"status": "ok", "msg": "session refreshed"}

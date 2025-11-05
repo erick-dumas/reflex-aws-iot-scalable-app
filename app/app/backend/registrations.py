@@ -1,22 +1,26 @@
+from typing import Set
 from redis.asyncio import Redis
 
 redis = Redis.from_url("redis://localhost", decode_responses=True)
 
-KEY_PREFIX = "device_tokens:"
+# Clave que contiene todos los tokens de navegadores registrados
+SESSIONS_KEY = "sessions:all"
 
-async def register_token_for_device(device_id: str, token: str):
-    await redis.sadd(f"{KEY_PREFIX}{device_id}", token)
-    await redis.setex(f"token_last_seen:{token}", 60 * 60 * 24, device_id)  # TTL 24h
-    print(f"Registered token for device {device_id}")
+# Prefijos y TTL para limpieza de tokens antiguos
+LAST_SEEN_PREFIX = "token_last_seen:"
+TOKEN_TTL_SECONDS = 60 * 60
 
-async def unregister_token_for_device(device_id: str, token: str):
-    await redis.srem(f"{KEY_PREFIX}{device_id}", token)
-    await redis.delete(f"token_last_seen:{token}")
 
-async def get_all_tokens() -> set[str]:
-    keys = await redis.keys(f"{KEY_PREFIX}*")
-    all_tokens = set()
-    for key in keys:
-        tokens = await redis.smembers(key)
-        all_tokens.update(tokens)
-    return all_tokens
+async def register_token(token: str) -> None:
+    await redis.sadd(SESSIONS_KEY, token)
+    # Guardar la referencia del token con TTL para facilitar limpieza
+    await redis.setex(f"{LAST_SEEN_PREFIX}{token}", TOKEN_TTL_SECONDS, "1")
+
+async def unregister_token(token: str) -> None:
+    await redis.srem(SESSIONS_KEY, token)
+    await redis.delete(f"{LAST_SEEN_PREFIX}{token}")
+
+async def get_all_tokens() -> Set[str]:
+    tokens = await redis.smembers(SESSIONS_KEY)
+    # `smembers` ya devuelve strings si decode_responses=True; convertir a set por seguridad
+    return set(tokens or [])

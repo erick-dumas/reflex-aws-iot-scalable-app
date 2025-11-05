@@ -9,5 +9,4 @@ class DeviceData(BaseModel):
 
 
 class RegisterPayload(BaseModel):
-    device_id: str
     token: str
