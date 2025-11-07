@@ -1,7 +1,10 @@
 from typing import Set
 from redis.asyncio import Redis
+import os
 
-redis = Redis.from_url("redis://localhost", decode_responses=True)
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost")
+
+redis = Redis.from_url(REDIS_URL, decode_responses=True)
 
 # Clave que contiene todos los tokens de navegadores registrados
 SESSIONS_KEY = "sessions:all"

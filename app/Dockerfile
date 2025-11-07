@@ -2,37 +2,49 @@
 # Stage 1: Builder
 ##############################
 FROM python:3.13 AS builder
+ARG API_URL="http://localhost:8000"
+ARG REDIS_URL="redis://localhost"
 
-# Directorio de trabajo
+ENV API_URL=$API_URL
+ENV REDIS_URL=$REDIS_URL
+
 WORKDIR /app
+COPY requirements.txt .
 
-# Copiamos todo el proyecto
-COPY . .
-
-# Instalamos dependencias
+RUN pip install --upgrade pip 
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Inicializamos Reflex (si ya existe, no hace nada malo)
-RUN reflex init
+COPY . .
+
+RUN reflex export
+
+RUN unzip frontend.zip -d frontend
+RUN rm frontend.zip
+RUN unzip backend.zip -d backend
+RUN rm backend.zip
 
 ##############################
 # Stage 2: Runtime
 ##############################
 FROM python:3.13-slim
+ARG API_URL="http://localhost:8000"
+ARG REDIS_URL="redis://localhost"
+
+ENV API_URL=$API_URL
+ENV REDIS_URL=$REDIS_URL
+
+RUN apt-get update && apt-get install -y unzip curl
 
 WORKDIR /app
 
-# Copiar instalación de Python del builder
-COPY --from=builder /usr/local /usr/local
+COPY --from=builder /app/backend ./
+COPY --from=builder /app/frontend ./
 
-# Copiar el proyecto completo
-COPY --from=builder /app /app
+RUN pip install --upgrade pip 
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Exponer puertos por defecto de Reflex
 EXPOSE 3000 8000
 
-# Necesario hasta que Reflex maneje SIGTERM correctamente
 STOPSIGNAL SIGKILL
 
-# Iniciar Reflex en modo producción
 CMD ["reflex", "run", "--env", "prod"]
