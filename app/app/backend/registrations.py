@@ -8,7 +8,7 @@ SESSIONS_KEY = "sessions:all"
 
 # Prefijos y TTL para limpieza de tokens antiguos
 LAST_SEEN_PREFIX = "token_last_seen:"
-TOKEN_TTL_SECONDS = 60 * 60
+TOKEN_TTL_SECONDS = 60 * 60 * 24
 
 
 async def register_token(token: str) -> None:

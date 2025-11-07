@@ -15,7 +15,6 @@ async def receive_data(payload: DeviceData):
 
         from app.app import app 
 
-        updated = 0 
         for token in tokens:
             
             state_key = f"{token}_{IndexState.get_full_name}"
@@ -24,7 +23,6 @@ async def receive_data(payload: DeviceData):
                 async with app.modify_state(state_key) as root_state:
                     index_state = await root_state.get_state(IndexState)
                     index_state.last_temperature = payload.temperature
-                updated += 1
             except Exception as e:
                 continue
 
