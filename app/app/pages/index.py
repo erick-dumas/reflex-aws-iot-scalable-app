@@ -1,9 +1,8 @@
 import reflex as rx
-import os
 from app.components import sidebar
 from app.states import IndexState
 
-BACKEND_URL = os.getenv("API_URL", "http://localhost:8000")
+BACKEND_URL = "http://localhost:8000"
 
 @rx.page("/")
 def dashboard() -> rx.Component:

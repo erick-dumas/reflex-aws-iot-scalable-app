@@ -2,10 +2,8 @@
 # Stage 1: Builder
 ##############################
 FROM python:3.13 AS builder
-ARG API_URL="http://localhost:8000"
 ARG REDIS_URL="redis://localhost"
 
-ENV API_URL=$API_URL
 ENV REDIS_URL=$REDIS_URL
 
 WORKDIR /app
@@ -27,10 +25,8 @@ RUN rm backend.zip
 # Stage 2: Runtime
 ##############################
 FROM python:3.13-slim
-ARG API_URL="http://localhost:8000"
 ARG REDIS_URL="redis://localhost"
 
-ENV API_URL=$API_URL
 ENV REDIS_URL=$REDIS_URL
 
 RUN apt-get update && apt-get install -y unzip curl

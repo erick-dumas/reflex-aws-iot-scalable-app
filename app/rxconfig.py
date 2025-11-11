@@ -3,7 +3,7 @@ import os
 
 config = rx.Config(
     app_name="app",
-    api_url=os.getenv("API_URL", "http://localhost:8000"),
+    api_url="http://localhost:8000",
     plugins=[
         rx.plugins.SitemapPlugin(),
         #rx.plugins.TailwindV4Plugin(),
