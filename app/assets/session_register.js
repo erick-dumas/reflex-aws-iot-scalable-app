@@ -1,7 +1,11 @@
 (function() {
-  if (window.__reflex_session_registered) return;
+  // Expose registration function so it can be explicitly triggered
+  // from the Reflex on_load flow (via a conditional inline script).
+  window.registerReflexSession = async function registerReflexSession() {
+    if (window.__reflex_session_registered) {
+      return;
+    }
 
-  (async function registerSession() {
     try {
       let token = null;
       try {
@@ -20,28 +24,41 @@
       }
 
       if (!token) {
-        console.warn("⚠️ Reflex token not found. Session registration skipped.");
+        // Token might not be available yet; retry shortly
+        setTimeout(() => {
+          window.registerReflexSession();
+        }, 500);
         return;
       }
 
       const payload = { token };
-
-      const BACKEND_URL = window.__BACKEND_URL;
+      const BACKEND_URL = window.__BACKEND_URL || "http://localhost:8000";
 
       const res = await fetch(`${BACKEND_URL}/sessions/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+      }).catch((err) => {
+        console.error("❌ Session register network error:", err);
+        return null;
       });
 
+      if (!res) return;
+
       if (!res.ok) {
-        console.error("❌ Failed to register session:", await res.text());
+        const text = await res.text().catch(() => "");
+        console.error("❌ Failed to register session:", text);
+        // Retry on server error after a delay
+        setTimeout(() => {
+          window.registerReflexSession();
+        }, 1000);
         return;
       }
 
       console.log("✅ Session registered successfully!");
       window.__reflex_session_registered = true;
 
+      // Keep the session alive with periodic pings
       if (!window.__reflex_session_ping_interval) {
         window.__reflex_session_ping_interval = setInterval(() => {
           fetch(`${BACKEND_URL}/sessions/ping`, {
@@ -54,6 +71,7 @@
         }, 60000);
       }
 
+      // Unregister on unload
       window.addEventListener("beforeunload", function() {
         const data = JSON.stringify(payload);
         try {
@@ -67,11 +85,30 @@
               keepalive: true,
             });
           }
-        } catch (e) {}
+        } catch (e) {
+          // ignore
+        }
       });
 
     } catch (err) {
       console.error("💥 Session registration error:", err);
+      // Retry on unexpected error
+      setTimeout(() => {
+        window.registerReflexSession();
+      }, 1000);
     }
-  })();
+  };
+
+  // Auto-attempt registration after DOM ready (small delay to allow Reflex)
+  function autoTry() {
+    if (!window.__reflex_session_registered) {
+      window.registerReflexSession();
+    }
+  }
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    setTimeout(autoTry, 300);
+  } else {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(autoTry, 300));
+  }
 })();
