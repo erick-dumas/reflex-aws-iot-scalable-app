@@ -16,7 +16,6 @@ async def receive_data(payload: DeviceData):
         from app.app import app 
 
         for token in tokens:
-            
             state_key = f"{token}_{IndexState.get_full_name}"
 
             try:
