@@ -1,242 +1,164 @@
 (function() {
-  // Expose registration function so it can be explicitly triggered
-  // from the Reflex on_load flow (via a conditional inline script).
-  window.registerReflexSession = async function registerReflexSession() {
-    if (window.__reflex_session_registered) {
-      return;
-    }
+  if (window.__reflex_session_registered) return;
 
+  // Helper: try multiple ways to get the token (getToken(), storages, cookies)
+  function readTokenFromStorages() {
     try {
-      let token = null;
-      try {
-        if (typeof getToken === "function") {
-          token = getToken();
-        }
-      } catch (e) {
-        token = null;
+      if (typeof getToken === "function") {
+        const t = getToken();
+        if (t) return t;
       }
+    } catch (e) {}
 
-      if (!token) {
-        token = sessionStorage.getItem("token") ||
-                sessionStorage.getItem("session.token") ||
-                localStorage.getItem("token") ||
-                null;
-      }
+    const fromSession = sessionStorage.getItem("token") || sessionStorage.getItem("session.token");
+    if (fromSession) return fromSession;
+    const fromLocal = localStorage.getItem("token") || localStorage.getItem("session.token");
+    if (fromLocal) return fromLocal;
 
-      if (!token) {
-        // Token might not be available yet; retry shortly
-        setTimeout(() => {
-          window.registerReflexSession();
-        }, 500);
-        return;
-      }
+    // Try cookies (common fallback)
+    try {
+      const match = document.cookie.match(/(?:^|; )(?:token|session\.token)=([^;]+)/);
+      if (match) return decodeURIComponent(match[1]);
+    } catch (e) {}
 
-      const payload = { token };
-      const BACKEND_URL = window.__BACKEND_URL || "http://localhost:8000";
+    return null;
+  }
 
+  const BACKEND_URL = window.__BACKEND_URL;
+
+  async function sendRegister(token) {
+    if (!token) return { ok: false, reason: "no-token" };
+    try {
       const res = await fetch(`${BACKEND_URL}/sessions/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }).catch((err) => {
-        console.error("❌ Session register network error:", err);
-        return null;
+        body: JSON.stringify({ token }),
+        keepalive: true,
       });
-
-      if (!res) return;
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        console.error("❌ Failed to register session:", text);
-        // Retry on server error after a delay
-        setTimeout(() => {
-          window.registerReflexSession();
-        }, 1000);
-        return;
-      }
-
-      console.log("✅ Session registered successfully!");
-      window.__reflex_session_registered = true;
-
-      // Keep the session alive with periodic pings
-      if (!window.__reflex_session_ping_interval) {
-        window.__reflex_session_ping_interval = setInterval(() => {
-          fetch(`${BACKEND_URL}/sessions/ping`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          }).catch((err) => {
-            console.warn("⚠️ Session ping failed:", err);
-          });
-        }, 60000);
-      }
-
-      // Unregister on unload — prefer sendBeacon with JSON blob so FastAPI can parse it.
-      // Fallback to keepalive fetch and, as a last resort, synchronous XHR.
-      window.addEventListener("beforeunload", function() {
-        const data = JSON.stringify(payload);
-        try {
-          const url = `${BACKEND_URL}/sessions/unregister`;
-          if (navigator.sendBeacon) {
-            // sendBeacon doesn't allow custom headers, but accepts a Blob with a MIME type.
-            const blob = new Blob([data], { type: "application/json" });
-            navigator.sendBeacon(url, blob);
-          } else if (typeof fetch === "function") {
-            try {
-              fetch(url, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: data,
-                keepalive: true,
-              });
-            } catch (err) {
-              // Last resort: synchronous XHR (may be blocked in some browsers)
-              try {
-                const xhr = new XMLHttpRequest();
-                xhr.open("POST", url, false);
-                xhr.setRequestHeader("Content-Type", "application/json");
-                xhr.send(data);
-              } catch (e) {
-                // ignore
-              }
-            }
-          }
-        } catch (e) {
-          // ignore
-        }
-      });
-
+      return { ok: res.ok, status: res.status, text: res.ok ? null : await res.text() };
     } catch (err) {
-      console.error("💥 Session registration error:", err);
-      // Retry on unexpected error
-      setTimeout(() => {
-        window.registerReflexSession();
-      }, 1000);
-    }
-  };
-
-  // Auto-attempt registration after DOM ready (small delay to allow Reflex)
-  function autoTry() {
-    if (!window.__reflex_session_registered) {
-      window.registerReflexSession();
+      return { ok: false, reason: err.message || String(err) };
     }
   }
 
-  if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    setTimeout(autoTry, 300);
-  } else {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(autoTry, 300));
-  }
-  // Helper to send unregister once (idempotent)
-  function sendUnregisterOnce() {
-    if (window.__reflex_session_unregistered) return;
-    window.__reflex_session_unregistered = true;
+  async function sendPing(token) {
+    if (!token) return { ok: false, reason: "no-token" };
     try {
-      const data = JSON.stringify(window.__reflex_last_payload || {});
-      const url = `${window.__BACKEND_URL || "http://localhost:8000"}/sessions/unregister`;
+      const res = await fetch(`${BACKEND_URL}/sessions/ping`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+        keepalive: true,
+      });
+      return { ok: res.ok, status: res.status, text: res.ok ? null : await res.text() };
+    } catch (err) {
+      return { ok: false, reason: err.message || String(err) };
+    }
+  }
+
+  function sendUnregisterBeacon(token) {
+    try {
+      const data = JSON.stringify({ token });
+      // navigator.sendBeacon cannot set headers; send a Blob with application/json
       if (navigator.sendBeacon) {
         const blob = new Blob([data], { type: "application/json" });
-        navigator.sendBeacon(url, blob);
-      } else if (typeof fetch === "function") {
-        try {
-          fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: data,
-            keepalive: true,
-          });
-        } catch (err) {
-          try {
-            const xhr = new XMLHttpRequest();
-            xhr.open("POST", url, false);
-            xhr.setRequestHeader("Content-Type", "application/json");
-            xhr.send(data);
-          } catch (e) {
-            // ignore
+        navigator.sendBeacon(`${BACKEND_URL}/sessions/unregister`, blob);
+      } else {
+        fetch(`${BACKEND_URL}/sessions/unregister`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: data,
+          keepalive: true,
+        }).catch(() => {});
+      }
+    } catch (e) {}
+  }
+
+  // Attempt registration with retries until success.
+  let registrationAttempts = 0;
+  let registrationRetryInterval = null;
+  let pingInterval = null;
+
+  async function attemptRegistrationOnce() {
+    registrationAttempts += 1;
+    const token = readTokenFromStorages();
+    if (!token) {
+      // No token available from client; nothing to do
+      return false;
+    }
+    const res = await sendRegister(token);
+    if (res.ok) {
+      console.log("✅ Session registered successfully!");
+      window.__reflex_session_registered = true;
+      window.__reflex_session_registered_token = token;
+      // Stop retrying
+      if (registrationRetryInterval) {
+        clearInterval(registrationRetryInterval);
+        registrationRetryInterval = null;
+      }
+      // Start pinging (use fresh token each time)
+      if (!pingInterval) {
+        // Ping faster than TTL (default ttl 5m), use 30s ping
+        pingInterval = setInterval(async () => {
+          const currentToken = readTokenFromStorages() || window.__reflex_session_registered_token;
+          const pingRes = await sendPing(currentToken);
+          if (!pingRes.ok) {
+            console.warn("⚠️ Session ping failed or token missing on server:", pingRes);
+            // Force re-registration flow on error
+            window.__reflex_session_registered = false;
+            window.__reflex_session_registered_token = null;
+            if (!registrationRetryInterval) {
+              registrationRetryInterval = setInterval(() => {
+                if (!window.__reflex_session_registered) attemptRegistrationOnce();
+              }, 5000);
+            }
+            if (pingInterval) {
+              clearInterval(pingInterval);
+              pingInterval = null;
+            }
           }
-        }
+        }, 30000);
       }
-    } catch (e) {
-      // ignore
+      return true;
+    } else {
+      // Not registered; server may be unreachable or token invalid
+      console.warn("❌ Failed to register session:", res);
+      return false;
     }
   }
 
-  // BroadcastChannel coordination — try to avoid unregistering if other tabs are still open.
-  let reflexChannel = null;
-  try {
-    if (typeof BroadcastChannel === "function") {
-      reflexChannel = new BroadcastChannel("reflex_session_channel");
-    }
-  } catch (e) {
-    reflexChannel = null;
-  }
-
-  if (reflexChannel) {
-    reflexChannel.addEventListener("message", (ev) => {
-      try {
-        const msg = ev.data || {};
-        if (!msg || msg.token !== (window.__reflex_last_payload && window.__reflex_last_payload.token)) return;
-        if (msg.type === "are_you_alive") {
-          // respond immediately to indicate this tab is alive
-          reflexChannel.postMessage({ type: "i_am_alive", token: msg.token });
-        }
-      } catch (e) {
-        // ignore
+  // Initial attempt and retry setup
+  (async function initRegistration() {
+    try {
+      // Try immediately
+      const ok = await attemptRegistrationOnce();
+      if (!ok && !registrationRetryInterval) {
+        // Retry every 5s until registered (useful if getToken becomes available later)
+        registrationRetryInterval = setInterval(() => {
+          if (!window.__reflex_session_registered) attemptRegistrationOnce();
+        }, 5000);
       }
-    });
-  }
 
-  // Attempt coordinated unregister: ask other tabs if they're alive; if none reply, send unregister.
-  function coordinatedUnregisterAttempt() {
-    if (!window.__reflex_last_payload || !window.__reflex_last_payload.token) {
-      sendUnregisterOnce();
-      return;
-    }
-    const token = window.__reflex_last_payload.token;
-    if (!reflexChannel) {
-      sendUnregisterOnce();
-      return;
-    }
-    let replied = false;
-    function onMsg(ev) {
-      try {
-        const msg = ev.data || {};
-        if (msg && msg.type === "i_am_alive" && msg.token === token) {
-          replied = true;
+      // Re-attempt registration on visibility change or focus (helps when tab was suspended)
+      window.addEventListener("visibilitychange", function() {
+        if (document.visibilityState === "visible" && !window.__reflex_session_registered) {
+          attemptRegistrationOnce();
         }
-      } catch (e) {}
-    }
-    reflexChannel.addEventListener("message", onMsg);
-    // Ask others if they're alive
-    reflexChannel.postMessage({ type: "are_you_alive", token });
-    // Wait briefly for responses; if none, assume we're last and unregister
-    setTimeout(() => {
-      reflexChannel.removeEventListener("message", onMsg);
-      if (!replied) {
-        sendUnregisterOnce();
+      });
+      window.addEventListener("focus", function() {
+        if (!window.__reflex_session_registered) attemptRegistrationOnce();
+      });
+
+      // Use pagehide (fired on navigation and tab close), and beforeunload as fallback.
+      function handleUnload() {
+        const token = readTokenFromStorages() || window.__reflex_session_registered_token || null;
+        if (token) sendUnregisterBeacon(token);
       }
-    }, 150);
-  }
-
-  // Try to unregister on multiple lifecycle events: pagehide, visibilitychange, beforeunload, unload.
-  // Using several hooks increases the chance of success when the whole browser is closing.
-  window.addEventListener("pagehide", () => {
-    coordinatedUnregisterAttempt();
-  }, { capture: true });
-
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") {
-      coordinatedUnregisterAttempt();
+      window.addEventListener("pagehide", handleUnload, { capture: false });
+      window.addEventListener("beforeunload", handleUnload, { capture: false });
+    } catch (err) {
+      console.error("💥 Session registration error:", err);
     }
-  }, { capture: true });
-
-  window.addEventListener("beforeunload", (ev) => {
-    coordinatedUnregisterAttempt();
-  }, { capture: true });
-
-  // As a last resort, ensure unload also triggers a best-effort send.
-  window.addEventListener("unload", () => {
-    sendUnregisterOnce();
-  }, { capture: true });
+  })();
 
 })();
